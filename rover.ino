@@ -1,6 +1,6 @@
 #define IR_sensor 2
-#define Trig 6
-#define Echo 5
+#define Trig 4
+#define Echo 3
 #define IN1 9 //fwd left
 #define IN2 10 //bwd left
 #define IN3 11 //fwd right
@@ -8,14 +8,14 @@
 #define OnOffButton 4
 #define PowerPin 7
 
-const float ARENA_DIAMETRE = 10.0   //needs tunning and verification
+const float ARENA_DIAMETRE = 50.0;   //needs tunning and verification
 
 enum {searchState, engageState, correctionState, pushState};
 unsigned char roverState;
 
 const byte onOffState = 0;
-const byte buttonNew;
-const byte buttonOld = 1;
+byte buttonNew;
+byte buttonOld = 1;
 
 const int delayTime = 100;
 const int pullBackTime = 5000;
@@ -29,19 +29,19 @@ float distance = 0.0;
 
 
 //for engage
-const float engageSpeed = ?;
+const float engageSpeed = 5;
 const int engageDelay = 100;
 float distanceOld = ARENA_DIAMETRE + 10;  //ensure that old distance is way larger than new distance, kick start the engage mode loop 
 float distanceNew;
 
 //for push
 const int pushDelay = 100;
-const float distancePush = ?;
+const float distancePush = 30;
 
 
 //for correction
 const int correctionDelay = 500;  //needs tunning to cover 100 degree after 2 stages of swing
-const rotateSpeed = ?;
+const int rotateSpeed = 10;
 byte correctionStage = 1;
 byte correctionResult;
 
@@ -56,18 +56,14 @@ void setup() {
   pinMode(IN3, OUTPUT);
   pinMode(IN4, OUTPUT);
 
-  pinMode(onButton, INPUT);
-  pinMode(IRsensor1, INPUT);
-  pinMode(IRsensor2, INPUT);
   pinMode(Trig, OUTPUT);
   pinMode(Echo, INPUT);
   Serial.begin(9600);
 }
 
-
 int waitForStart(){
   while(1){
-    buttonNew = digitalRead(OnOffButton)
+    buttonNew = digitalRead(OnOffButton);
     if(buttonNew && !buttonOld){
       //low -> high => switch on 
       return 0;
@@ -148,13 +144,13 @@ void halt(){
   digitalWrite(IN2,LOW);
   digitalWrite(IN3,LOW);
   digitalWrite(IN4,LOW);
-  
+  Serial.println("halted");  
 }
 
 void pullBack(){
-  backwardAnalog()
-  delay(pullBackTime)
-  halt()
+  backward();
+  delay(pullBackTime);
+  halt();
 }
 
 void searchLeft(){
@@ -178,31 +174,33 @@ float getDistance(){
   //pulseIn measures duration after echo is turned on
   duration = pulseIn(Echo, HIGH);
   //0,0343 = speed of sound, time*speed=distance
-  return (duration/2)*0.0343;
-
-  //prints distance
-  //Serial.println("distance is" +String(distance));
+  float distance = (duration/2)*0.0343;
+  Serial.println("distance: " +String(distance));
+  return distance;
 }
 
 
 int search(){
-  stop();
+  halt();
   distanceNew = getDistance();
-  while(distance > ARENA_DIAMETRE){
-    rotateLeft();
+  while(distanceNew !=0 && distanceNew > ARENA_DIAMETRE){
+    rotateLeft(255);
     delay(searchDelay);
     distanceNew = getDistance();
   }
+  halt();
   if(distance < distancePush){
+    Serial.println("search ended, target close, will push");
     return 0; //close to target, push mode 
   }else{
+    Serial.println("search ended, target far, will engage");
     return 1; //far to target, engage mode
   }
 }
 
 int engage(){
   distanceNew = getDistance();
-  while(disanceNew <= distanceOld && distanceNew >= distancePush){
+  while(distanceNew <= distanceOld && distanceNew >= distancePush){
     forwardAnalog(engageSpeed);
     delay(engageDelay);
     distanceNew = getDistance();
@@ -210,39 +208,37 @@ int engage(){
   if(distanceNew < distancePush){
     return 0;   //close to target, switch to push state
   }else{
-    retur 1;    //lost target, switch to correction state
+    return 1;    //lost target, switch to correction state
   }
 
 }
 
 int push(){
   distanceNew = getDistance();
-  while(disanceNew <= distanceOld){
+  while(distanceNew <= distanceOld){
     forward();      //full thrust
     delay(pushDelay);
   }
   return 1;
 }
 
-
-
 int correction(){
   //oscillates left and right till search span covered around 100 degree, then it's safe to say we lost target completely, will switch to search state
   //if found within 100 degree, switch to engage or push states depending on distance to target
-  distanceOld = ARENA_DIAMETRE
-  distance = getDistance()
+  distanceOld = ARENA_DIAMETRE;
+  distance = getDistance();
 
   for(int i = 0; i<2; i++){
     rotateLeft(rotateSpeed);
     delay(correctionDelay*correctionStage);
-    distance = getDistance()
-    if(distance < distanceOld){return (distance > distancePush)}    //1 => engage     0 => push
+    distance = getDistance();
+    if(distance < distanceOld){return (distance > distancePush);};  //1 => engage     0 => push
     correctionStage++;
     rotateRight(rotateSpeed);
     delay(correctionDelay*correctionStage);
 
-    distance = getDistance()
-    if(distance < distanceOld){return (distance > distancePush)}
+    distance = getDistance();
+    if(distance < distanceOld){return (distance > distancePush);}
     correctionStage++;
   }
 
@@ -262,6 +258,7 @@ void loop() {
       break;
     case engageState:
       Serial.println("engage state start");
+      while(1){delay(100);}
 
       if(engage() == 0){
         roverState = pushState;
@@ -271,12 +268,14 @@ void loop() {
       break;
     case pushState:
       Serial.println("push state start");
-      push()
+      while(1){delay(100);}
+
+      push();
       roverState = correctionState;
       break;
     case correctionState:
       Serial.println("correction state start");
-      correctionResult = correction()
+      correctionResult = correction();
       if(correctionResult == 2){
         roverState = searchState;
         break;
