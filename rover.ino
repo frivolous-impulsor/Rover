@@ -181,15 +181,16 @@ float getDistance(){
 
 
 int search(){
+  Serial.println("search state start");
   halt();
-  distanceNew = getDistance();
+  float distanceNew = getDistance();
   while(distanceNew !=0 && distanceNew > ARENA_DIAMETRE){
     rotateLeft(255);
     delay(searchDelay);
     distanceNew = getDistance();
   }
   halt();
-  if(distance < distancePush){
+  if(distanceNew < distancePush){
     Serial.println("search ended, target close, will push");
     return 0; //close to target, push mode 
   }else{
@@ -199,34 +200,49 @@ int search(){
 }
 
 int engage(){
-  distanceNew = getDistance();
-  while(distanceNew <= distanceOld && distanceNew >= distancePush){
-    forwardAnalog(engageSpeed);
+  Serial.println("engage state start");
+  const float eps = 1;
+
+  float distanceOld = ARENA_DIAMETRE;
+  float distanceNew = getDistance();
+  while(distanceNew <= (distanceOld + eps) && distanceNew >= distancePush){
+    forwardAnalog(125);
     delay(engageDelay);
+    distanceOld = distanceNew;
     distanceNew = getDistance();
   }
-  if(distanceNew < distancePush){
-    return 0;   //close to target, switch to push state
+  if(distanceNew <= (distancePush + eps) ){
+    Serial.println("close to target, switch to push state");
+    return 0;
   }else{
-    return 1;    //lost target, switch to correction state
+    Serial.println("lost target, switch to correction state");
+    return 1;
   }
 
 }
 
 int push(){
-  distanceNew = getDistance();
-  while(distanceNew <= distanceOld){
+  Serial.println("push state start");
+  float eps = 1;
+  float distanceOld = ARENA_DIAMETRE;
+  float distanceNew = getDistance();
+  while(distanceNew <= (distanceOld + eps)){
     forward();      //full thrust
     delay(pushDelay);
+    distanceOld = distanceNew;
+    distanceNew = getDistance();
   }
+  halt();
+  Serial.println("lost target, will switch to correction state");
   return 1;
 }
 
 int correction(){
+  Serial.println("correction state start");
   //oscillates left and right till search span covered around 100 degree, then it's safe to say we lost target completely, will switch to search state
   //if found within 100 degree, switch to engage or push states depending on distance to target
-  distanceOld = ARENA_DIAMETRE;
-  distance = getDistance();
+  float distanceOld = ARENA_DIAMETRE;
+  float distance = getDistance();
 
   for(int i = 0; i<2; i++){
     rotateLeft(rotateSpeed);
@@ -249,7 +265,6 @@ void loop() {
   // put your main code here, to run repeatedly:
   switch(roverState){
     case searchState:
-      Serial.println("search state start");
       if(search() == 0){
         roverState = pushState;
       }else{
@@ -257,24 +272,19 @@ void loop() {
       }
       break;
     case engageState:
-      Serial.println("engage state start");
-      while(1){delay(100);}
-
       if(engage() == 0){
         roverState = pushState;
       }else{
-        roverState = correctionState;
+        //roverState = correctionState;
+        roverState = searchState;
       }
       break;
     case pushState:
-      Serial.println("push state start");
-      while(1){delay(100);}
-
       push();
-      roverState = correctionState;
+      //roverState = correctionState;
+      roverState = searchState;
       break;
     case correctionState:
-      Serial.println("correction state start");
       correctionResult = correction();
       if(correctionResult == 2){
         roverState = searchState;
