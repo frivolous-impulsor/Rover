@@ -5,34 +5,24 @@
 #define IN2 10 //bwd left
 #define IN3 11 //fwd right
 #define IN4 12//bwd right
-#define OnOffButton 4
 #define PowerPin 7
 
 const float ARENA_DIAMETRE = 50.0;   //needs tunning and verification
 
 enum {searchState, engageState, correctionState, pushState};
-unsigned char roverState;
+unsigned char roverState; //global var that indicates the current state
 
 const byte onOffState = 0;
-byte buttonNew;
-byte buttonOld = 1;
 
 const int delayTime = 100;
 const int pullBackTime = 5000;
 const int searchDelay = 100;
 
-
-float duration = 0.0;
-float distance = 0.0;
-
 //for search
-
 
 //for engage
 const float engageSpeed = 5;
 const int engageDelay = 100;
-float distanceOld = ARENA_DIAMETRE + 10;  //ensure that old distance is way larger than new distance, kick start the engage mode loop 
-float distanceNew;
 
 //for push
 const int pushDelay = 100;
@@ -41,14 +31,11 @@ const float distancePush = 30;
 
 //for correction
 const int correctionDelay = 500;  //needs tunning to cover 100 degree after 2 stages of swing
-const int rotateSpeed = 10;
-byte correctionStage = 1;
-byte correctionResult;
 
 void setup() {
   // put your setup code here, to run once:
   //Define to rename pins to their purpose
-  attachInterrupt(digitalPinToInterrupt(IR_sensor), pullBack, RISING);
+  //attachInterrupt(digitalPinToInterrupt(IR_sensor), pullBack, RISING);
   //Left motor
   pinMode(IN1, OUTPUT);
   pinMode(IN2, OUTPUT);
@@ -61,17 +48,7 @@ void setup() {
   Serial.begin(9600);
 }
 
-int waitForStart(){
-  while(1){
-    buttonNew = digitalRead(OnOffButton);
-    if(buttonNew && !buttonOld){
-      //low -> high => switch on 
-      return 0;
-    }
-    buttonOld = buttonNew;
-    delay(100);
-  }
-}
+
 
 void forward(){
 
@@ -165,6 +142,8 @@ void searchLeft(){
 // ultra sound
 float getDistance(){
   // turns trig on for a fraction of a second,
+  float duration = 0.0;
+  float distance = 0.0;
   digitalWrite(Trig, LOW);
   delayMicroseconds(2);
   digitalWrite(Trig, HIGH);
@@ -174,7 +153,7 @@ float getDistance(){
   //pulseIn measures duration after echo is turned on
   duration = pulseIn(Echo, HIGH);
   //0,0343 = speed of sound, time*speed=distance
-  float distance = (duration/2)*0.0343;
+  distance = (duration/2)*0.0343;
   Serial.println("distance: " +String(distance));
   return distance;
 }
@@ -238,26 +217,43 @@ int push(){
 }
 
 int correction(){
+  //return 0 => push, 1 => engage, 2 => search
+
   Serial.println("correction state start");
   //oscillates left and right till search span covered around 100 degree, then it's safe to say we lost target completely, will switch to search state
   //if found within 100 degree, switch to engage or push states depending on distance to target
-  float distanceOld = ARENA_DIAMETRE;
-  float distance = getDistance();
+  float distance;
+  int correctionStage = 1;
+  int delayTime = 100;
+  float proportionFactor = 0.5;
+  float time;
+  int rotateSpeed = 255;
+  float eps = 1.0;
 
-  for(int i = 0; i<2; i++){
+  for(int t = 1; t<4; ++t){ //t:= proportional time spent rotating left, 1->2->3   each left succeeded with right rotation of doouble time to recover
+    time = t*proportionFactor;
+    int iterationLeft = int(time*1000/delayTime);
+    int iterationRight = 2*iterationLeft;
+
     rotateLeft(rotateSpeed);
-    delay(correctionDelay*correctionStage);
-    distance = getDistance();
-    if(distance < distanceOld){return (distance > distancePush);};  //1 => engage     0 => push
-    correctionStage++;
+    for(int l = 0; l<iterationLeft; ++l){
+      delay(delayTime);
+      distance = getDistance();
+      if(distance < (ARENA_DIAMETRE + eps)){
+        return (distance > distancePush);
+      }
+    }
+
     rotateRight(rotateSpeed);
-    delay(correctionDelay*correctionStage);
+    for(int r = 0; r<iterationLeft; ++r){
+      delay(delayTime);
+      distance = getDistance();
+      if(distance < (ARENA_DIAMETRE + eps)){
+        return (distance > distancePush);
+      }
+    }
 
-    distance = getDistance();
-    if(distance < distanceOld){return (distance > distancePush);}
-    correctionStage++;
   }
-
   return 2;
 }
 
@@ -275,27 +271,26 @@ void loop() {
       if(engage() == 0){
         roverState = pushState;
       }else{
-        //roverState = correctionState;
-        roverState = searchState;
+        roverState = correctionState;
+        //roverState = searchState;
       }
       break;
     case pushState:
       push();
-      //roverState = correctionState;
-      roverState = searchState;
+      roverState = correctionState;
+      //roverState = searchState;
       break;
     case correctionState:
-      correctionResult = correction();
-      if(correctionResult == 2){
-        roverState = searchState;
-        break;
-      }else if(correctionResult){
-        roverState = engageState;
-        break;
-      }else{
+      int correctionResult = correction();
+      if(correctionResult == 0){
         roverState = pushState;
-        break;
+      }else if(correctionResult == 1){
+        roverState = engageState;
+      }else{
+        roverState = searchState;
       }
+      break;
       
   }
+  //delay(300);  //delay for debug
 }
