@@ -16,7 +16,7 @@ const byte onOffState = 0;
 
 const int delayTime = 100;
 const int pullBackTime = 5000;
-const int searchDelay = 100;
+const int searchDelay = 50;
 
 //for search
 
@@ -25,12 +25,12 @@ const float engageSpeed = 5;
 const int engageDelay = 100;
 
 //for push
-const int pushDelay = 100;
+const int delayTimePush = 100;
 const float distancePush = 30;
 
 
 //for correction
-const int correctionDelay = 500;  //needs tunning to cover 100 degree after 2 stages of swing
+const int delayTimeCorrection = 50;
 
 void setup() {
   // put your setup code here, to run once:
@@ -99,6 +99,7 @@ void backwardAnalog(int speed){
 }
 
 void rotateLeft(int speed){
+  Serial.println("rotate left");
   // left motor
   analogWrite(IN1, 0);
   analogWrite(IN2,speed);
@@ -108,6 +109,7 @@ void rotateLeft(int speed){
 }
 
 void rotateRight(int speed){
+  Serial.println("rotate right");
   // left motor
   analogWrite(IN1, speed);
   analogWrite(IN2,0);
@@ -144,6 +146,7 @@ float getDistance(){
   // turns trig on for a fraction of a second,
   float duration = 0.0;
   float distance = 0.0;
+  const float errReadingMax = 0.2;
   digitalWrite(Trig, LOW);
   delayMicroseconds(2);
   digitalWrite(Trig, HIGH);
@@ -154,6 +157,9 @@ float getDistance(){
   duration = pulseIn(Echo, HIGH);
   //0,0343 = speed of sound, time*speed=distance
   distance = (duration/2)*0.0343;
+  if(distance <= errReadingMax){
+    return getDistance();
+  }
   Serial.println("distance: " +String(distance));
   return distance;
 }
@@ -163,8 +169,9 @@ int search(){
   Serial.println("search state start");
   halt();
   float distanceNew = getDistance();
-  while(distanceNew !=0 && distanceNew > ARENA_DIAMETRE){
-    rotateLeft(255);
+  
+  rotateLeft(255);
+  while(distanceNew > ARENA_DIAMETRE + ){
     delay(searchDelay);
     distanceNew = getDistance();
   }
@@ -205,9 +212,9 @@ int push(){
   float eps = 1;
   float distanceOld = ARENA_DIAMETRE;
   float distanceNew = getDistance();
-  while(distanceNew <= (distanceOld + eps)){
-    forward();      //full thrust
-    delay(pushDelay);
+  forward();      //full thrust
+  while(distanceNew < distancePush || distanceNew <= (distanceOld + eps)){
+    delay(delayTimePush);
     distanceOld = distanceNew;
     distanceNew = getDistance();
   }
@@ -218,26 +225,27 @@ int push(){
 
 int correction(){
   //return 0 => push, 1 => engage, 2 => search
-
   Serial.println("correction state start");
   //oscillates left and right till search span covered around 100 degree, then it's safe to say we lost target completely, will switch to search state
   //if found within 100 degree, switch to engage or push states depending on distance to target
   float distance;
   int correctionStage = 1;
-  int delayTime = 100;
   float proportionFactor = 0.5;
   float time;
   int rotateSpeed = 255;
   float eps = 1.0;
+  const float swingTimeFactor = 700;
 
+  int iterationLeft;
+  int iterationRight;
   for(int t = 1; t<4; ++t){ //t:= proportional time spent rotating left, 1->2->3   each left succeeded with right rotation of doouble time to recover
     time = t*proportionFactor;
-    int iterationLeft = int(time*1000/delayTime);
-    int iterationRight = 2*iterationLeft;
+    iterationLeft = int(time*swingTimeFactor/delayTime);
+    iterationRight = 2*iterationLeft;
 
     rotateLeft(rotateSpeed);
     for(int l = 0; l<iterationLeft; ++l){
-      delay(delayTime);
+      delay(delayTimeCorrection);
       distance = getDistance();
       if(distance < (ARENA_DIAMETRE + eps)){
         return (distance > distancePush);
@@ -245,8 +253,8 @@ int correction(){
     }
 
     rotateRight(rotateSpeed);
-    for(int r = 0; r<iterationLeft; ++r){
-      delay(delayTime);
+    for(int r = 0; r<iterationRight; ++r){
+      delay(delayTimeCorrection);
       distance = getDistance();
       if(distance < (ARENA_DIAMETRE + eps)){
         return (distance > distancePush);
