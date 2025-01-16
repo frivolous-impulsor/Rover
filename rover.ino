@@ -169,9 +169,10 @@ int search(){
   Serial.println("search state start");
   halt();
   float distanceNew = getDistance();
+  float eps = 1.0;
   
   rotateLeft(255);
-  while(distanceNew > ARENA_DIAMETRE + ){
+  while(distanceNew > ARENA_DIAMETRE + eps){
     delay(searchDelay);
     distanceNew = getDistance();
   }
