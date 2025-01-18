@@ -9,19 +9,20 @@
 
 const float ARENA_DIAMETRE = 77.0;   //needs tunning and verification
 
-enum {engageState, searchState, correctionState, pushState};
-unsigned char roverState; //global var that indicates the current state
+enum {engageState, searchState, correctionState, pushState, pullbackState};
+volatile unsigned char roverState = correctionState; //global var that indicates the current state
 
 //const byte onOffState = 0;
 
 const int delayTime = 100;
-const int pullBackTime = 2000000;
-const int searchDelay = 50;
+const long pullBackTime = 300;
+const int searchDelay = 100;
 
 //for search
+const int searchSpeed = 64;
 
 //for engage
-const float engageSpeed = 5;
+const int engageSpeed = 64;
 const int engageDelay = 100;
 
 //for push
@@ -30,12 +31,12 @@ const float distancePush = 30;
 
 
 //for correction
-const int delayTimeCorrection = 50;
+const int correctionSpeed = 64;
+const int delayTimeCorrection = 100;
 
 void setup() {
   // put your setup code here, to run once:
   //Define to rename pins to their purpose
-  attachInterrupt(digitalPinToInterrupt(IR_sensor), pullBack, RISING);
   //Left motor
   pinMode(IN1, OUTPUT);
   pinMode(IN2, OUTPUT);
@@ -45,6 +46,9 @@ void setup() {
 
   pinMode(Trig, OUTPUT);
   pinMode(Echo, INPUT);
+  pinMode(IR_sensor, INPUT);
+  //attachInterrupt(digitalPinToInterrupt(IR_sensor), pullBack, HIGH);
+
   Serial.begin(9600);
 }
 
@@ -69,6 +73,7 @@ void backwardAnalog(int speed){
   analogWrite(IN4,speed);
 }
 
+
 void rotateLeft(int speed){
   Serial.println("rotate left");
   // left motor
@@ -77,6 +82,18 @@ void rotateLeft(int speed){
   // right motor
   analogWrite(IN3,speed);
   analogWrite(IN4,0);
+
+  analogWrite(IN1, 0);
+  analogWrite(IN2,speed);
+  // right motor
+  analogWrite(IN3,speed);
+  analogWrite(IN4,0);
+}
+
+void rotateLeftSlow(){
+  rotateLeft(64);
+  delay(60);
+  rotateLeft(0);
 }
 
 void rotateRight(int speed){
@@ -89,6 +106,13 @@ void rotateRight(int speed){
   analogWrite(IN4,speed);
 }
 
+void rotateRightSlow(){
+  rotateRight(64);
+  delay(60);
+  rotateRight(0);
+}
+
+
 void halt(){
   analogWrite(IN1,HIGH);
   analogWrite(IN2,HIGH);
@@ -97,21 +121,12 @@ void halt(){
   Serial.println("halted");  
 }
 
+
 void pullBack(){
-  Serial.println("IR sensor detected! pull back");
-  backwardAnalog(255);
-  delayMicroseconds(pullBackTime);
   halt();
+  roverState = pullbackState;
+  Serial.println("IR sensor detected! pull back");
 }
-
-void searchLeft(){
-  analogWrite(IN1, 0);
-  analogWrite(IN2,0);
-  // right motor
-  analogWrite(IN3,200);
-  analogWrite(IN4,0);
-}
-
 
 // ultra sound
 float getDistance(){
@@ -141,13 +156,12 @@ float getDistance(){
 
 int search(){
   Serial.println("search state start");
-  halt();
   float distanceNew = getDistance();
   float eps = 1.0;
   
-  rotateLeft(255);
   while(distanceNew > ARENA_DIAMETRE + eps){
-    delay(searchDelay);
+
+    rotateLeftSlow();
     distanceNew = getDistance();
   }
   halt();
@@ -166,17 +180,19 @@ int engage(){
 
   float distanceOld = ARENA_DIAMETRE;
   float distanceNew = getDistance();
-  forwardAnalog(125);
+  forwardAnalog(engageSpeed);
   
   while(distanceNew <= (distanceOld + eps) && distanceNew >= distancePush){
     delay(engageDelay);
     distanceOld = distanceNew;
     distanceNew = getDistance();
   }
+  
   if(distanceNew <= (distancePush + eps) ){
     Serial.println("close to target, switch to push state");
     return 0;
   }else{
+    halt();
     Serial.println("lost target, switch to correction state");
     return 1;
   }
@@ -208,31 +224,32 @@ int correction(){
   int correctionStage = 1;
   float proportionFactor = 0.5;
   float time;
-  int rotateSpeed = 255;
   float eps = 1.0;
-  const float swingTimeFactor = 700;
+  const float swingTimeFactor = 200;
 
   int iterationLeft;
   int iterationRight;
-  for(int t = 1; t<4; ++t){ //t:= proportional time spent rotating left, 1->2->3   each left succeeded with right rotation of doouble time to recover
+  for(int t = 1; t<5; ++t){ //t:= proportional time spent rotating left, 1->2->3   each left succeeded with right rotation of doouble time to recover
     time = t*proportionFactor;
     iterationLeft = int(time*swingTimeFactor/delayTime);
     iterationRight = 2*iterationLeft;
 
-    rotateLeft(rotateSpeed);
     for(int l = 0; l<iterationLeft; ++l){
-      delay(delayTimeCorrection);
+      rotateLeftSlow();
       distance = getDistance();
       if(distance < (ARENA_DIAMETRE + eps)){
+        halt();
+        Serial.println("found opponent");
         return (distance > distancePush);
       }
     }
 
-    rotateRight(rotateSpeed);
     for(int r = 0; r<iterationRight; ++r){
-      delay(delayTimeCorrection);
+      rotateRightSlow();
       distance = getDistance();
       if(distance < (ARENA_DIAMETRE + eps)){
+        halt();
+        Serial.println("found opponent");
         return (distance > distancePush);
       }
     }
@@ -242,51 +259,11 @@ int correction(){
 }
 
 void test(){
-  forwardAnalog(255);
-  delay(2000);
-  backwardAnalog(255);
-  delay(2000);
-
+  pullBack();
 }
 
-void search_destroy(){
-  switch(roverState){
-    case searchState:
-      if(search() == 0){
-        roverState = pushState;
-      }else{
-        roverState = engageState;
-      }
-      break;
-    case engageState:
-      if(engage() == 0){
-        roverState = pushState;
-      }else{
-        roverState = correctionState;
-        //roverState = searchState;
-      }
-      break;
-    case pushState:
-      push();
-      roverState = correctionState;
-      //roverState = searchState;
-      break;
-    case correctionState:
-      int correctionResult = correction();
-      if(correctionResult == 0){
-        roverState = pushState;
-      }else if(correctionResult == 1){
-        roverState = engageState;
-      }else{
-        roverState = searchState;
-      }
-      break;
-      
-  }
-}
-
-void loop() {
-  // put your main code here, to run repeatedly:
+void s_d(){
+    // put your main code here, to run repeatedly:
     switch(roverState){
     case searchState:
       if(search() == 0){
@@ -321,4 +298,8 @@ void loop() {
       
   }
   //delay(1000);  //delay for debug
+}
+
+void loop() {
+  s_d();
 }
