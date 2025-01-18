@@ -1,21 +1,21 @@
 #define IR_sensor 2
-#define Trig 4
-#define Echo 3
-#define IN1 9 //fwd left
-#define IN2 10 //bwd left
-#define IN3 11 //fwd right
-#define IN4 12//bwd right
-#define PowerPin 7
+#define Trig 5
+#define Echo 6
+#define IN1 3 //fwd left
+#define IN2 9 //bwd left
+#define IN3 10 //fwd right
+#define IN4 11//bwd right
+//#define PowerPin 7
 
-const float ARENA_DIAMETRE = 50.0;   //needs tunning and verification
+const float ARENA_DIAMETRE = 77.0;   //needs tunning and verification
 
-enum {searchState, engageState, correctionState, pushState};
+enum {engageState, searchState, correctionState, pushState};
 unsigned char roverState; //global var that indicates the current state
 
-const byte onOffState = 0;
+//const byte onOffState = 0;
 
 const int delayTime = 100;
-const int pullBackTime = 5000;
+const int pullBackTime = 2000000;
 const int searchDelay = 50;
 
 //for search
@@ -35,7 +35,7 @@ const int delayTimeCorrection = 50;
 void setup() {
   // put your setup code here, to run once:
   //Define to rename pins to their purpose
-  //attachInterrupt(digitalPinToInterrupt(IR_sensor), pullBack, RISING);
+  attachInterrupt(digitalPinToInterrupt(IR_sensor), pullBack, RISING);
   //Left motor
   pinMode(IN1, OUTPUT);
   pinMode(IN2, OUTPUT);
@@ -48,39 +48,9 @@ void setup() {
   Serial.begin(9600);
 }
 
-
-
-void forward(){
-
-  //May vary depending on motor wiring
-  //left motor
-  digitalWrite(IN1,HIGH);
-  digitalWrite(IN2,LOW);
-
-  //right motor
-  digitalWrite(IN3,HIGH);
-  digitalWrite(IN4,LOW);
-  //analogWrite(IN1,100);
-  //analogWrite(IN2,0);
-  // right motor
-  //analogWrite(IN3, 100);
-  //analogWrite(IN4,0);
-}
-
-void backward(){
-
-  //May vary depending on motor wiring
-
-  //left motor
-  digitalWrite(IN1,LOW);
-  digitalWrite(IN2,HIGH);
-
-  //right motor
-  digitalWrite(IN3,LOW);
-  digitalWrite(IN4,HIGH);
-}
-
 void forwardAnalog(int speed){
+  Serial.println("forward analog");
+
   //left motor
   analogWrite(IN1, speed);
   analogWrite(IN2,0);
@@ -90,6 +60,7 @@ void forwardAnalog(int speed){
 }
 
 void backwardAnalog(int speed){
+  Serial.println("backward analog");
   //left motor
   analogWrite(IN1, 0);
   analogWrite(IN2,speed);
@@ -119,16 +90,17 @@ void rotateRight(int speed){
 }
 
 void halt(){
-  digitalWrite(IN1,LOW);
-  digitalWrite(IN2,LOW);
-  digitalWrite(IN3,LOW);
-  digitalWrite(IN4,LOW);
+  analogWrite(IN1,HIGH);
+  analogWrite(IN2,HIGH);
+  analogWrite(IN3,HIGH);
+  analogWrite(IN4,HIGH);
   Serial.println("halted");  
 }
 
 void pullBack(){
-  backward();
-  delay(pullBackTime);
+  Serial.println("IR sensor detected! pull back");
+  backwardAnalog(255);
+  delayMicroseconds(pullBackTime);
   halt();
 }
 
@@ -158,6 +130,8 @@ float getDistance(){
   //0,0343 = speed of sound, time*speed=distance
   distance = (duration/2)*0.0343;
   if(distance <= errReadingMax){
+    Serial.println("distance off");
+    
     return getDistance();
   }
   Serial.println("distance: " +String(distance));
@@ -192,8 +166,9 @@ int engage(){
 
   float distanceOld = ARENA_DIAMETRE;
   float distanceNew = getDistance();
+  forwardAnalog(125);
+  
   while(distanceNew <= (distanceOld + eps) && distanceNew >= distancePush){
-    forwardAnalog(125);
     delay(engageDelay);
     distanceOld = distanceNew;
     distanceNew = getDistance();
@@ -213,7 +188,7 @@ int push(){
   float eps = 1;
   float distanceOld = ARENA_DIAMETRE;
   float distanceNew = getDistance();
-  forward();      //full thrust
+  forwardAnalog(255);      //full thrust
   while(distanceNew < distancePush || distanceNew <= (distanceOld + eps)){
     delay(delayTimePush);
     distanceOld = distanceNew;
@@ -266,8 +241,15 @@ int correction(){
   return 2;
 }
 
-void loop() {
-  // put your main code here, to run repeatedly:
+void test(){
+  forwardAnalog(255);
+  delay(2000);
+  backwardAnalog(255);
+  delay(2000);
+
+}
+
+void search_destroy(){
   switch(roverState){
     case searchState:
       if(search() == 0){
@@ -301,5 +283,42 @@ void loop() {
       break;
       
   }
-  //delay(300);  //delay for debug
+}
+
+void loop() {
+  // put your main code here, to run repeatedly:
+    switch(roverState){
+    case searchState:
+      if(search() == 0){
+        roverState = pushState;
+      }else{
+        roverState = engageState;
+      }
+      break;
+    case engageState:
+      if(engage() == 0){
+        roverState = pushState;
+      }else{
+        roverState = correctionState;
+        //roverState = searchState;
+      }
+      break;
+    case pushState:
+      push();
+      roverState = correctionState;
+      //roverState = searchState;
+      break;
+    case correctionState:
+      int correctionResult = correction();
+      if(correctionResult == 0){
+        roverState = pushState;
+      }else if(correctionResult == 1){
+        roverState = engageState;
+      }else{
+        roverState = searchState;
+      }
+      break;
+      
+  }
+  //delay(1000);  //delay for debug
 }
