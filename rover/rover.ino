@@ -9,13 +9,14 @@
 
 const float ARENA_DIAMETRE = 77.0;   //needs tunning and verification
 
-enum {engageState, searchState, correctionState, pushState, pullbackState};
-volatile unsigned char roverState = correctionState; //global var that indicates the current state
+enum {engageState, searchState, correctionState, pushState};
+unsigned char roverState = correctionState; //global var that indicates the current state
 
+volatile bool atMargin = false;
 //const byte onOffState = 0;
 
 const int delayTime = 100;
-const long pullBackTime = 300;
+const long pullbackTime = 300;
 const int searchDelay = 100;
 
 //for search
@@ -47,9 +48,14 @@ void setup() {
   pinMode(Trig, OUTPUT);
   pinMode(Echo, INPUT);
   pinMode(IR_sensor, INPUT);
-  //attachInterrupt(digitalPinToInterrupt(IR_sensor), pullBack, HIGH);
+  attachInterrupt(digitalPinToInterrupt(IR_sensor), setMargin, HIGH);
 
   Serial.begin(9600);
+}
+
+void setMargin(){
+  atMargin = true;
+  Serial.println("IR detected, atMargin set");
 }
 
 void forwardAnalog(int speed){
@@ -121,11 +127,13 @@ void halt(){
   Serial.println("halted");  
 }
 
-
-void pullBack(){
+void pullback(){
   halt();
-  roverState = pullbackState;
-  Serial.println("IR sensor detected! pull back");
+  backwardAnalog(125);
+  delay(1500);
+  halt();
+  atMargin = false;
+  Serial.println("pulled back");
 }
 
 // ultra sound
@@ -160,7 +168,9 @@ int search(){
   float eps = 1.0;
   
   while(distanceNew > ARENA_DIAMETRE + eps){
-
+    if(atMargin){
+      pullback();
+    }
     rotateLeftSlow();
     distanceNew = getDistance();
   }
@@ -180,9 +190,13 @@ int engage(){
 
   float distanceOld = ARENA_DIAMETRE;
   float distanceNew = getDistance();
-  forwardAnalog(engageSpeed);
   
   while(distanceNew <= (distanceOld + eps) && distanceNew >= distancePush){
+    forwardAnalog(engageSpeed);
+
+    if(atMargin){
+      pullback();
+    }
     delay(engageDelay);
     distanceOld = distanceNew;
     distanceNew = getDistance();
@@ -204,8 +218,11 @@ int push(){
   float eps = 1;
   float distanceOld = ARENA_DIAMETRE;
   float distanceNew = getDistance();
-  forwardAnalog(255);      //full thrust
   while(distanceNew < distancePush || distanceNew <= (distanceOld + eps)){
+    forwardAnalog(255);      //full thrust
+    if(atMargin){
+      pullback();
+    }
     delay(delayTimePush);
     distanceOld = distanceNew;
     distanceNew = getDistance();
@@ -235,6 +252,9 @@ int correction(){
     iterationRight = 2*iterationLeft;
 
     for(int l = 0; l<iterationLeft; ++l){
+      if(atMargin){
+        pullback();
+      }
       rotateLeftSlow();
       distance = getDistance();
       if(distance < (ARENA_DIAMETRE + eps)){
@@ -245,6 +265,9 @@ int correction(){
     }
 
     for(int r = 0; r<iterationRight; ++r){
+      if(atMargin){
+        pullback();
+      }
       rotateRightSlow();
       distance = getDistance();
       if(distance < (ARENA_DIAMETRE + eps)){
@@ -259,7 +282,7 @@ int correction(){
 }
 
 void test(){
-  pullBack();
+  pullback();
 }
 
 void s_d(){
